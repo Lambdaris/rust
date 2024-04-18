@@ -28,6 +28,7 @@ mod test;
 mod util;
 
 use std::borrow::Borrow;
+use std::collections::BTreeMap;
 use std::mem;
 
 /// Arguments to [`Builder::then_else_break_inner`] that are usually forwarded
@@ -1855,6 +1856,18 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         // Extract the match-pair from the highest priority candidate and build a test from it.
         let (match_place, test) = self.pick_test(candidates);
 
+        // Record spans of targets. `test.span` only represents `Enum::A` out of `Enum::A | Enum::B`
+        // Span in extra data to identify associated candidate later.
+        let mut coverage_targets: BTreeMap<_, _> = candidates
+            .iter()
+            .filter_map(|candidate| {
+                candidate
+                    .match_pairs
+                    .first()
+                    .map(|match_pair| (candidate.extra_data.span, (match_pair.pattern.span, None)))
+            })
+            .collect();
+
         // For each of the N possible test outcomes, build the vector of candidates that applies if
         // the test has that particular outcome.
         let (remaining_candidates, target_candidates) =
@@ -1881,6 +1894,12 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             .into_iter()
             .map(|(branch, mut candidates)| {
                 let candidate_start = self.cfg.start_new_block();
+                // After `match_candidates` above the candidate replace its `matched_pairs` with sub patterns.
+                // But with luck the extra_data.span is unchanged. So we can use it to find the associated target span and update its target blocks.
+                coverage_targets
+                    .get_mut(&candidates.first().expect("must be non-empty").extra_data.span)
+                    .expect("must exist")
+                    .1 = Some(candidate_start);
                 self.match_candidates(
                     span,
                     scrutinee_span,
@@ -1891,6 +1910,14 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 (branch, candidate_start)
             })
             .collect();
+
+        // Maybe only call this when target branch is Switch or SwitchInt?
+        self.visit_pattern_match_branches(
+            coverage_targets
+                .into_values()
+                .filter_map(|(span, target)| target.map(|blk| (span, blk))),
+            remainder_start,
+        );
 
         // Perform the test, branching to one of N blocks.
         self.perform_test(

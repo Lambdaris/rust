@@ -1,5 +1,6 @@
 use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
+use std::collections::BTreeMap;
 
 use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::mir::coverage::{BlockMarkerId, BranchSpan, CoverageKind};
@@ -7,6 +8,7 @@ use rustc_middle::mir::{self, BasicBlock, UnOp};
 use rustc_middle::thir::{ExprId, ExprKind, Thir};
 use rustc_middle::ty::TyCtxt;
 use rustc_span::def_id::LocalDefId;
+use rustc_span::Span;
 
 use crate::build::Builder;
 
@@ -16,6 +18,7 @@ pub(crate) struct BranchInfoBuilder {
 
     num_block_markers: usize,
     branch_spans: Vec<BranchSpan>,
+    pattern_match_branches: BTreeMap<Span, (Vec<BasicBlock>, Vec<BasicBlock>)>,
 }
 
 #[derive(Clone, Copy)]
@@ -33,7 +36,12 @@ impl BranchInfoBuilder {
     /// is enabled and `def_id` represents a function that is eligible for coverage.
     pub(crate) fn new_if_enabled(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<Self> {
         if tcx.sess.instrument_coverage_branch() && tcx.is_eligible_for_coverage(def_id) {
-            Some(Self { nots: FxHashMap::default(), num_block_markers: 0, branch_spans: vec![] })
+            Some(Self {
+                nots: FxHashMap::default(),
+                num_block_markers: 0,
+                branch_spans: vec![],
+                pattern_match_branches: BTreeMap::new(),
+            })
         } else {
             None
         }
@@ -86,7 +94,7 @@ impl BranchInfoBuilder {
     }
 
     pub(crate) fn into_done(self) -> Option<Box<mir::coverage::BranchInfo>> {
-        let Self { nots: _, num_block_markers, branch_spans } = self;
+        let Self { nots: _, num_block_markers, branch_spans, .. } = self;
 
         if num_block_markers == 0 {
             assert!(branch_spans.is_empty());
@@ -142,5 +150,30 @@ impl Builder<'_, '_> {
             true_marker,
             false_marker,
         });
+    }
+
+    #[allow(unused)]
+    pub(crate) fn visit_pattern_match_branches(
+        &mut self,
+        targets: impl Iterator<Item = (Span, BasicBlock)>,
+        otherwise_block: BasicBlock,
+    ) {
+        // TODO! Add get_block_marker_id here to transform BasicBlock to BlockMarkerId then `pattern_match_branches` could store BlockMarkerId.
+        let targets = targets.collect::<Vec<_>>();
+
+        let Some(branch_info) = self.coverage_branch_info.as_mut() else { return };
+        for (span, true_blk) in &targets {
+            let (true_blks, false_blks) =
+                branch_info.pattern_match_branches.entry(*span).or_insert_with(|| (vec![], vec![]));
+            // SomeEnum::A | SomeEnum::B would be lowered to something like switchInt(_1) -> [ 0: bb1, 1: bb3, otherwise: otherwise_block ]
+            // Thus bb3 and otherwise_block both are false blocks for SomeEnum::A.
+            true_blks.push(*true_blk);
+            false_blks.extend(
+                targets
+                    .iter()
+                    .filter_map(|(_, blk)| (blk != true_blk).then_some(*blk))
+                    .chain(std::iter::once(otherwise_block)),
+            );
+        }
     }
 }
