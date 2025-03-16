@@ -139,7 +139,8 @@ fn filtered_statement_span(statement: &Statement<'_>) -> Option<Span> {
         StatementKind::Coverage(
             CoverageKind::VirtualCounter { .. }
             | CoverageKind::CondBitmapUpdate { .. }
-            | CoverageKind::TestVectorBitmapUpdate { .. },
+            | CoverageKind::TestVectorBitmapUpdate { .. }
+            | CoverageKind::CondBitmapReset { .. },
         ) => bug!(
             "Unexpected coverage statement found during coverage instrumentation: {statement:?}"
         ),

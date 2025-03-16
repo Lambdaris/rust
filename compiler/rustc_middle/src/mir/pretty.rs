@@ -562,7 +562,7 @@ fn write_coverage_info_hi(
     let coverage::CoverageInfoHi {
         num_block_markers: _,
         branch_spans,
-        mcdc_degraded_branch_spans,
+        mcdc_degraded_spans,
         mcdc_spans,
     } = coverage_info_hi;
 
@@ -577,9 +577,7 @@ fn write_coverage_info_hi(
         did_print = true;
     }
 
-    for coverage::MCDCBranchSpan { span, true_marker, false_marker, .. } in
-        mcdc_degraded_branch_spans
-    {
+    for coverage::MCDCBranchSpan { span, true_marker, false_marker, .. } in mcdc_degraded_spans {
         writeln!(
             w,
             "{INDENT}coverage branch {{ true: {true_marker:?}, false: {false_marker:?} }} => {span:?}",
@@ -587,10 +585,7 @@ fn write_coverage_info_hi(
         did_print = true;
     }
 
-    for (
-        coverage::MCDCDecisionSpan { span, end_markers, decision_depth, num_conditions: _ },
-        conditions,
-    ) in mcdc_spans
+    for (coverage::MCDCDecisionSpan { span, end_markers, decision_depth }, conditions) in mcdc_spans
     {
         let num_conditions = conditions.len();
         writeln!(

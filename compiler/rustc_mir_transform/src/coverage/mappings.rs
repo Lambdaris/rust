@@ -201,17 +201,27 @@ pub(super) fn extract_mcdc_mappings(
             }
             let span = unexpand_into_body_span(raw_span, body_span)?;
 
-            let true_bcb = bcb_from_marker(true_marker)?;
-            let false_bcb = bcb_from_marker(false_marker)?;
-            Some((span, true_bcb, false_bcb))
+            let true_bcbs = bcb_from_marker(true_marker)?;
+            let false_bcbs = bcb_from_marker(false_marker)?;
+
+            Some((span, true_bcbs, false_bcbs))
         };
 
-    let to_mcdc_branch = |&mir::coverage::MCDCBranchSpan {
-                              span: raw_span,
-                              condition_info,
-                              true_marker,
-                              false_marker,
-                          }| {
+    let mut get_bitmap_idx = |num_test_vectors: usize| -> Option<usize> {
+        let bitmap_idx = *mcdc_bitmap_bits;
+        let next_bitmap_bits = bitmap_idx.saturating_add(num_test_vectors);
+        (next_bitmap_bits <= MCDC_MAX_BITMAP_SIZE).then(|| {
+            *mcdc_bitmap_bits = next_bitmap_bits;
+            bitmap_idx
+        })
+    };
+
+    let extract_condition_mapping = |&mir::coverage::MCDCBranchSpan {
+                                         span: raw_span,
+                                         condition_info,
+                                         true_marker,
+                                         false_marker,
+                                     }| {
         let (span, true_bcb, false_bcb) = check_branch_bcb(raw_span, true_marker, false_marker)?;
         Some(MCDCBranch {
             span,
@@ -223,16 +233,8 @@ pub(super) fn extract_mcdc_mappings(
         })
     };
 
-    let mut get_bitmap_idx = |num_test_vectors: usize| -> Option<usize> {
-        let bitmap_idx = *mcdc_bitmap_bits;
-        let next_bitmap_bits = bitmap_idx.saturating_add(num_test_vectors);
-        (next_bitmap_bits <= MCDC_MAX_BITMAP_SIZE).then(|| {
-            *mcdc_bitmap_bits = next_bitmap_bits;
-            bitmap_idx
-        })
-    };
     mcdc_degraded_branches
-        .extend(coverage_info_hi.mcdc_degraded_branch_spans.iter().filter_map(to_mcdc_branch));
+        .extend(coverage_info_hi.mcdc_degraded_spans.iter().filter_map(extract_condition_mapping));
 
     mcdc_mappings.extend(coverage_info_hi.mcdc_spans.iter().filter_map(|(decision, branches)| {
         if branches.len() == 0 {
@@ -245,7 +247,9 @@ pub(super) fn extract_mcdc_mappings(
             .iter()
             .map(|&marker| bcb_from_marker(marker))
             .collect::<Option<_>>()?;
-        let mut branch_mappings: Vec<_> = branches.into_iter().filter_map(to_mcdc_branch).collect();
+
+        let mut branch_mappings: Vec<_> =
+            branches.into_iter().filter_map(extract_condition_mapping).collect();
         if branch_mappings.len() != branches.len() {
             mcdc_degraded_branches.extend(branch_mappings);
             return None;

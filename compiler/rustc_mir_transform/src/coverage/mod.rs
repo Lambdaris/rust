@@ -159,7 +159,14 @@ fn create_mappings(extracted_mappings: &ExtractedMappings) -> Vec<Mapping> {
              condition_info: _,
              true_index: _,
              false_index: _,
-         }| { Mapping { kind: MappingKind::Branch { true_bcb, false_bcb }, span } },
+         }| {
+            Mapping {
+                // FIXME For now both true bcbs and false bcbs only contain one bcb,
+                //
+                kind: MappingKind::Branch { true_bcb, false_bcb },
+                span,
+            }
+        },
     ));
 
     for (decision, branches) in mcdc_mappings {
@@ -233,7 +240,7 @@ fn inject_mcdc_statements<'tcx>(
             );
         }
 
-        for &mappings::MCDCBranch {
+        for mappings::MCDCBranch {
             span: _,
             true_bcb,
             false_bcb,
@@ -242,7 +249,7 @@ fn inject_mcdc_statements<'tcx>(
             false_index,
         } in conditions
         {
-            for (index, bcb) in [(false_index, false_bcb), (true_index, true_bcb)] {
+            for (&index, &bcb) in [(false_index, false_bcb), (true_index, true_bcb)] {
                 let bb = graph[bcb].leader_bb();
                 inject_statement(
                     mir_body,
